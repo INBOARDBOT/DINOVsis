@@ -1,0 +1,114 @@
+# =============================================================================
+# config/config.yaml  —  Central configuration for DINOv3 NPC segmentation
+# =============================================================================
+# All path values under [paths] are relative to the project REPO_DIR.
+# train.py resolves them to absolute paths automatically.
+#
+# CLI overrides (highest priority, dot-notation):
+#   python train.py --set training.epochs=20 optimizer.lr=5e-5
+#   python train.py --set model.backbone=vitl16
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# File paths
+# -----------------------------------------------------------------------------
+paths:
+  # Split CSVs (no header; columns: image_path, mask_path — relative to REPO_DIR)
+  train_csv:       data/splits/train_t1.csv
+  val_csv:         data/splits/valid_t1.csv
+  test_csv:        data/splits/test_t1.csv
+
+  # Where to write trained weights
+  weights_dir:     weights
+
+  # Final checkpoint filename (written inside weights_dir)
+  output_weights:  dinounet_light_final.pth
+
+
+# -----------------------------------------------------------------------------
+# Data / preprocessing
+# -----------------------------------------------------------------------------
+data:
+  # Target resolution fed to the network (DINOv3 ViT-S/16 expects multiples of 16)
+  img_size: 896
+
+  # Slicing axis: 0 = sagittal, 1 = coronal, 2 = axial (recommended)
+  slice_axis: 2
+
+  # Whether to keep slices that contain no foreground label
+  keep_empty_train: false   # Skip background-only slices during training
+  keep_empty_val:   false   # Same for validation
+
+
+# -----------------------------------------------------------------------------
+# Model
+# -----------------------------------------------------------------------------
+model:
+  # -------------------------------------------------------------------------
+  # Backbone selection
+  # -------------------------------------------------------------------------
+  # Pick ONE of the following keys — must match an entry in DINOV3_REGISTRY
+  # inside load_model.py.  The corresponding weight file must exist under
+  #   <REPO_DIR>/dinov3_ViT_model_weights/
+  #
+  #   Key          Architecture       Weight file
+  #   ----------   ----------------   -------------------------------------------
+  #   vits16       ViT-Small/16       dinov3_vits16_pretrain_lvd1689m-08c60483.pth
+  #   vits16plus   ViT-Small+/16      dinov3_vits16plus_pretrain_lvd1689m-4057cbaa.pth
+  #   vitb16       ViT-Base/16        dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth
+  #   vitl16       ViT-Large/16       dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth
+  #   vith16plus   ViT-Huge+/16       dinov3_vith16plus_pretrain_lvd1689m-7c1da9a5.pth
+  # -------------------------------------------------------------------------
+  backbone: vits16      # <-- change this line to switch backbone
+
+  # Feature dimension of the chosen backbone (used by head_model.py)
+  # vits16 / vits16plus → 384  |  vitb16 → 768  |  vitl16 → 1024  |  vith16plus → 1280
+  embed_dim: 384
+
+  # Total number of output classes (including background = 0)
+  # NPC dataset: 0 = background, 1 = primary tumour, 2 = lymph node
+  num_classes: 2
+
+
+# -----------------------------------------------------------------------------
+# Training
+# -----------------------------------------------------------------------------
+training:
+  epochs:      10
+  batch_size:  2
+  num_workers: 2      # DataLoader worker processes; set to 0 to disable multiprocessing
+  pin_memory:  true   # Speeds up host→GPU transfers; disable if RAM is tight
+
+  # Device to train on. Falls back to "cpu" automatically when CUDA is unavailable.
+  device: cuda:0
+
+  # Periodic checkpoint: save a .pth every N epochs (0 = only save at end + best)
+  save_every_n_epochs: 0
+
+  # Optional per-class loss weighting for CrossEntropyLoss.
+  # Set to null to use uniform weights, or provide a list of length num_classes.
+  # Example for heavily imbalanced NPC data (background >> tumour >> lymph node):
+  class_weights: [0.1, 1.0]
+  # class_weights: null
+
+
+# -----------------------------------------------------------------------------
+# Optimiser & scheduler
+# -----------------------------------------------------------------------------
+optimizer:
+  # AdamW hyper-parameters
+  lr:           1.0e-4
+  weight_decay: 1.0e-4
+
+  # Learning-rate scheduler
+  # Supported: "cosine" | "step" | null (constant LR)
+  scheduler:
+    name: cosine      # CosineAnnealingLR from epoch 0 → T_max=epochs
+
+    # --- CosineAnnealingLR options ---
+    eta_min: 1.0e-6   # Minimum LR at the end of the cosine cycle
+
+    # --- StepLR options (only used when name: step) ---
+    step_size: 5      # Decay LR every N epochs
+    gamma:     0.5    # Multiplicative factor for StepLR
